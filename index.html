@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R6 Emote Viewer</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f2330; --fg:#e6e9ef; --muted:#9aa3b2; --accent:#4f8cff; --accent2:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); height:100vh; display:flex; flex-direction:column; }
+  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid #2a2f3a; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:1.1rem; }
+  header .sub { color:var(--muted); font-size:.85rem; }
+  header .rigbox { display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; }
+  header .rigbox label { color:var(--muted); font-size:.85rem; }
+  .main { flex:1; display:flex; min-height:0; }
+  .panel { width:380px; background:var(--panel); border-right:1px solid #2a2f3a; padding:12px; overflow:auto; display:flex; flex-direction:column; gap:12px; }
+  .viewer { flex:1; position:relative; background:#0a0c10; }
+  #canvas { width:100%; height:100%; display:block; }
+  .card { background:var(--panel2); border:1px solid #2a2f3a; border-radius:10px; padding:12px; }
+  .card h3 { margin:0 0 8px; font-size:.95rem; color:var(--fg); }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:6px 0 2px; }
+  input[type=text], textarea, select { width:100%; background:#0f1115; color:var(--fg); border:1px solid #2a2f3a; border-radius:6px; padding:8px; font-family:inherit; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:.9rem; }
+  button.secondary { background:#2a2f3a; color:var(--fg); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  .stats { font-size:.8rem; color:var(--muted); line-height:1.5; }
+  .stats b { color:var(--fg); }
+  input[type=range] { width:100%; }
+  .timeline { display:flex; align-items:center; gap:8px; }
+  .timeline span { font-size:.75rem; color:var(--muted); min-width:48px; text-align:center; }
+  .hud { position:absolute; top:10px; right:10px; background:rgba(0,0,0,.55); padding:8px 10px; border-radius:8px; font-size:.75rem; color:#ddd; pointer-events:none; }
+  .pill { display:inline-block; background:#2a2f3a; padding:2px 8px; border-radius:999px; font-size:.75rem; margin:2px; }
+  .emote-list { max-height:260px; overflow:auto; border:1px solid #2a2f3a; border-radius:6px; }
+  .emote-item { padding:6px 10px; cursor:pointer; font-size:.85rem; border-bottom:1px solid #2a2f3a; display:flex; align-items:center; gap:6px; }
+  .emote-item:hover { background:#2a2f3a; }
+  .emote-item.active { background:var(--accent); color:#fff; }
+  .emote-item.err { color:var(--accent2); }
+  .spinner { display:inline-block; width:12px; height:12px; border:2px solid #555; border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg);} }
+  .search { width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>R6 Emote Viewer</h1>
+  <span class="sub">GitHub doihi/json-emote-list からエモート再生</span>
+  <div class="rigbox">
+    <span id="rigLabel" class="pill">Standard</span>
+  </div>
+</header>
+<div class="main">
+  <div class="panel">
+    <div class="card">
+      <h3>エモート</h3>
+      <input type="text" id="emoteSearch" class="search" placeholder="検索...">
+      <div id="emoteStatus" class="stats" style="margin-top:6px;">一覧を取得中...</div>
+      <div class="emote-list" id="emoteList"></div>
+    </div>
+
+    <div class="card">
+      <h3>再生コントロール</h3>
+      <div class="row">
+        <button id="playBtn">▶ 再生</button>
+        <button id="pauseBtn" class="secondary">⏸ 一時停止</button>
+        <button id="stopBtn" class="secondary">⏹ 停止</button>
+      </div>
+      <label>速度</label>
+      <select id="speed">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2x</option>
+      </select>
+      <label><input type="checkbox" id="loopChk" checked> ループ</label>
+      <label>シーク</label>
+      <div class="timeline">
+        <span id="tCur">0.00</span>
+        <input type="range" id="slider" min="0" max="1" step="0.001" value="0">
+        <span id="tDur">0.00</span>
+      </div>
+      <div class="stats" id="currentEmote">現在: (なし)</div>
+    </div>
+
+    <div class="card">
+      <h3>体型スライダー（停止中のみ有効）</h3>
+      <label>高さ: <span id="hv">1.00</span></label>
+      <input type="range" id="heightScale" min="0.5" max="1.5" step="0.01" value="1">
+      <label>横幅: <span id="wv">1.00</span></label>
+      <input type="range" id="widthScale" min="0.5" max="1.5" step="0.01" value="1">
+      <label>頭: <span id="ev">1.00</span></label>
+      <input type="range" id="headScale" min="0.5" max="2.0" step="0.01" value="1">
+    </div>
+
+    <div class="card">
+      <h3>表示</h3>
+      <label><input type="checkbox" id="showGrid" checked> グリッド</label>
+      <label><input type="checkbox" id="showSkeleton" checked> ボーン線</label>
+      <label><input type="checkbox" id="showJoints" checked> ジョイント表示</label>
+      <label><input type="checkbox" id="autoRotate" > 自動回転</label>
+    </div>
+
+    <div class="card">
+      <h3>情報</h3>
+      <div class="stats" id="stats">未読み込み</div>
+    </div>
+  </div>
+  <div class="viewer">
+    <canvas id="canvas"></canvas>
+    <div class="hud" id="hud">—</div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const PEACH = 0xffcc99, GREY = 0x8a8a8a, BLUE = 0x3366cc, ROOTC = 0x555555;
+
+// ---------- shape helpers ----------
+function bboxSize(shape, dims) {
+  switch (shape) {
+    case 'box': return [dims[0], dims[1], dims[2]];
+    case 'sphere': { const r=dims[0]; return [2*r, 2*r, 2*r]; }
+    case 'cylinder': case 'frustum': {
+      const arr = dims.length === 2 ? [dims[0],dims[0],dims[1]] : dims;
+      const r = Math.max(arr[0], arr[1]); return [2*r, arr[2], 2*r];
+    }
+    case 'capsule': { const [r,h]=dims; return [2*r, h+2*r, 2*r]; }
+    default: return [1,1,1];
+  }
+}
+function makeGeometry(shape, dims) {
+  switch (shape) {
+    case 'box': return new THREE.BoxGeometry(dims[0], dims[1], dims[2]);
+    case 'sphere': return new THREE.SphereGeometry(dims[0], 16, 16);
+    case 'cylinder': {
+      const arr = dims.length === 2 ? [dims[0],dims[0],dims[1]] : dims;
+      return new THREE.CylinderGeometry(arr[0], arr[1], arr[2], 16);
+    }
+    case 'capsule': {
+      const [r,h] = dims;
+      return new THREE.CapsuleGeometry(r, h, 8, 16);
+    }
+    case 'frustum': {
+      const arr = dims.length === 2 ? [dims[0],dims[0],dims[1]] : dims;
+      return new THREE.CylinderGeometry(arr[0], arr[1], arr[2], 16);
+    }
+    default: return new THREE.BoxGeometry(1,1,1);
+  }
+}
+function applyScales(shape, dims, partKey, scales) {
+  const h = scales.height, w = scales.width, hd = scales.head;
+  const isHead = (partKey === 'head');
+  const headMul = isHead ? hd : 1;
+  switch (shape) {
+    case 'box': return [dims[0]*w*headMul, dims[1]*h*headMul, dims[2]*w*headMul];
+    case 'sphere': { const r = dims[0] * (isHead ? hd : (w+h)/2); return [r]; }
+    case 'cylinder': case 'frustum': {
+      const arr = dims.slice();
+      if (arr.length === 2) return [arr[0]*w*headMul, arr[0]*w*headMul, arr[1]*h*headMul];
+      return [arr[0]*w*headMul, arr[1]*w*headMul, arr[2]*h*headMul];
+    }
+    case 'capsule': { const [r,len] = dims; return [r*w*headMul, len*h*headMul]; }
+    default: return dims.slice();
+  }
+}
+
+// ---------- rig definitions ----------
+function joint(name, parent, child, pn, cn) {
+  return { name, parent, child, parentNorm: pn.slice(), childNorm: cn.slice() };
+}
+const R6_PARTS_BASE = {
+  root:    { name:'Root',     shape:'box', dimensions:[0.6,0.6,0.6], color:ROOTC, parent:null },
+  torso:   { name:'Torso',    shape:'box', dimensions:[2.0,2.0,1.0], color:GREY, parent:'root' },
+  head:    { name:'Head',     shape:'box', dimensions:[1.2,1.2,1.2], color:PEACH, parent:'torso' },
+  leftarm: { name:'Left Arm', shape:'box', dimensions:[1.0,2.0,1.0], color:PEACH, parent:'torso' },
+  rightarm:{ name:'Right Arm',shape:'box', dimensions:[1.0,2.0,1.0], color:PEACH, parent:'torso' },
+  leftleg: { name:'Left Leg', shape:'box', dimensions:[1.0,2.0,1.0], color:BLUE, parent:'torso' },
+  rightleg:{ name:'Right Leg',shape:'box', dimensions:[1.0,2.0,1.0], color:BLUE, parent:'torso' },
+};
+const R6_JOINTS_NORM = [
+  joint('RootJoint','root','torso', [0,0,0], [0,0,0]),
+  joint('Neck','torso','head', [0,0.5,0], [0,-0.5,0]),
+  joint('LeftShoulder','torso','leftarm', [-0.5,0.5,0], [0.5,0.5,0]),
+  joint('RightShoulder','torso','rightarm', [0.5,0.5,0], [-0.5,0.5,0]),
+  joint('LeftHip','torso','leftleg', [-0.25,-0.5,0], [0,0.5,0]),
+  joint('RightHip','torso','rightleg', [0.25,-0.5,0], [0,0.5,0]),
+];
+const R6_ORDER = ['root','torso','head','leftarm','rightarm','leftleg','rightleg'];
+
+const RIGS = { R6: { parts: R6_PARTS_BASE, joints: R6_JOINTS_NORM, partOrder: R6_ORDER } };
+
+const PRESETS = { Standard: { scales: { height:1, width:1, head:1 }, R6: {}, extra: { R6: [] } } };
+const PRESET_LEGACY_MAP = { Girl:'Standard', Boy:'Standard', Kid:'Standard', Slim:'Standard', Broad:'Standard' };
+
+// ---------- ALIASES (legacy) ----------
+const ALIAS_R15 = {
+  root:'root', humanoidrootpart:'root', hrp:'root', rootpart:'root',
+  lowertorso:'lowertorso', uppertorso:'uppertorso', torso:'uppertorso',
+  head:'head',
+  leftupperarm:'leftupperarm', leftlowerarm:'leftlowerarm', lefthand:'lefthand',
+  rightupperarm:'rightupperarm', rightlowerarm:'rightlowerarm', righthand:'righthand',
+  leftupperleg:'leftupperleg', leftlowerleg:'leftlowerleg', leftfoot:'leftfoot',
+  rightupperleg:'rightupperleg', rightlowerleg:'rightlowerleg', rightfoot:'rightfoot',
+};
+const ALIAS = {
+  R6: { root:'root', humanoidrootpart:'root', hrp:'root', rootpart:'root',
+    torso:'torso', head:'head',
+    leftarm:'leftarm', leftshoulder:'leftarm', 'left arm':'leftarm',
+    rightarm:'rightarm', rightshoulder:'rightarm', 'right arm':'rightarm',
+    leftleg:'leftleg', lefthip:'leftleg', 'left leg':'leftleg',
+    rightleg:'rightleg', righthip:'rightleg', 'right leg':'rightleg' },
+};
+function normKey(s){ return String(s).toLowerCase().replace(/[\s_\-]/g,''); }
+function aliasLookup(rigType, name) {
+  const map = (rigType === 'R15') ? ALIAS_R15 : (ALIAS[rigType] || {});
+  const n = normKey(name);
+  if (map[n]) return map[n];
+  const rig = RIGS[rigType] || RIGS.R6;
+  if (rig.parts[n]) return n;
+  for (const key in rig.parts) { if (n.includes(key) || key.includes(n)) return key; }
+  return null;
+}
+const POSE_MAP_R15_TO_R6 = {
+  root:'root', lowertorso:'torso', uppertorso:'torso', head:'head',
+  leftupperarm:'leftarm', leftlowerarm:'leftarm', lefthand:'leftarm',
+  rightupperarm:'rightarm', rightlowerarm:'rightarm', righthand:'rightarm',
+  leftupperleg:'leftleg', leftlowerleg:'leftleg', leftfoot:'leftleg',
+  rightupperleg:'rightleg', rightlowerleg:'rightleg', rightfoot:'rightleg',
+};
+
+// ---------- scene ----------
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c10);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(8, 5, 10);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1,0);
+controls.enableDamping = true;
+const ambient = new THREE.AmbientLight(0xffffff, 0.5); scene.add(ambient);
+const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(5,10,7); scene.add(dir);
+const dir2 = new THREE.DirectionalLight(0x88aaff, 0.3); dir2.position.set(-5,5,-7); scene.add(dir2);
+const grid = new THREE.GridHelper(20,20,0x333344,0x222233); scene.add(grid);
+const axes = new THREE.AxesHelper(2); scene.add(axes);
+const rigContainer = new THREE.Group(); scene.add(rigContainer);
+
+// ---------- state ----------
+let currentRig = 'R6';
+let currentPreset = 'Standard';
+let bodyScale = { height:1, width:1, head:1 };
+
+let PARTS = null, JOINTS = null, PART_ORDER = null;
+let groups = {}, meshes = {}, jointMarkers = [], skelLines = {};
+const skelMat = new THREE.LineBasicMaterial({color:0xffd166, opacity:0.9, transparent:true});
+
+// ---------- emote state ----------
+const REQUIRED_PARTS = ['Torso','Head','Left Arm','Right Arm','Left Leg','Right Leg'];
+let emoteList = [];          // [{name, download_url}]
+let emoteCache = {};         // name -> parsed data
+let currentEmote = null;     // parsed data
+let currentEmoteName = '';
+let playing = false;
+let elapsed = 0;
+let speed = 1;
+let loop = true;
+let duration = 0;
+let frames = [];
+let restPose = {};           // partKey -> {pos:Vector3, quat:Quaternion} (rest world)
+let emotePlaying = false;
+let sliderUpdating = false;
+let baseRootPos = new THREE.Vector3(0,0,0);
+let baseRootQuat = new THREE.Quaternion();
+let playbackRootPos = new THREE.Vector3(0,0,0);
+let playbackRootQuat = new THREE.Quaternion();
+
+// ---------- coord transform (Roblox -> app) ----------
+// Both right-handed Y-up; Roblox front -Z, right +X. App keeps identity.
+function robloxToApp(cf) {
+  // cf: [x,y,z, r00..r22] row-major. Return same (identity basis).
+  return cf.slice();
+}
+
+function cfToPosQuat(cf) {
+  const pos = new THREE.Vector3(cf[0], cf[1], cf[2]);
+  const m = new THREE.Matrix4();
+  m.set(cf[3], cf[4], cf[5], 0, cf[6], cf[7], cf[8], 0, cf[9], cf[10], cf[11], 0, 0,0,0,1);
+  const q = new THREE.Quaternion();
+  q.setFromRotationMatrix(m);
+  return { pos, quat: q };
+}
+
+// ---------- build model ----------
+function resolvePartSpec(base, presetOverride, scales) {
+  const shape = (presetOverride && presetOverride.shape) || base.shape;
+  const dims0 = (presetOverride && presetOverride.dimensions) ? presetOverride.dimensions.slice() : base.dimensions.slice();
+  const color = (presetOverride && presetOverride.color != null) ? presetOverride.color : base.color;
+  const dims = applyScales(shape, dims0, base.key || '', scales);
+  const size = bboxSize(shape, dims);
+  return { key: base.key, name: base.name, shape, dimensions: dims, color, size };
+}
+
+function buildModel(rigType, presetName, scales) {
+  while (rigContainer.children.length) {
+    const c = rigContainer.children[0];
+    rigContainer.remove(c);
+    const disposeOne = (o) => {
+      if (o.geometry && o.geometry.dispose) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => { if (m.dispose) m.dispose(); });
+        else if (o.material.dispose) o.material.dispose();
+      }
+    };
+    disposeOne(c);
+    if (c.children) c.children.forEach(ch => disposeOne(ch));
+  }
+  groups = {}; meshes = {}; jointMarkers = []; skelLines = {};
+  PARTS = {}; JOINTS = []; PART_ORDER = [];
+
+  const preset = PRESETS[presetName] || PRESETS.Standard;
+  const finalScales = {
+    height: scales.height * (preset.scales ? preset.scales.height : 1),
+    width: scales.width * (preset.scales ? preset.scales.width : 1),
+    head: scales.head * (preset.scales ? preset.scales.head : 1),
+  };
+
+  const baseRig = RIGS[rigType];
+  const partDefs = {};
+  const partParent = {};
+  const partOrder = baseRig.partOrder.slice();
+
+  for (const key of baseRig.partOrder) {
+    const base = baseRig.parts[key];
+    const override = (preset[rigType] || {})[key];
+    const spec = resolvePartSpec({ key, name: base.name, shape: base.shape, dimensions: base.dimensions, color: base.color }, override, finalScales);
+    partDefs[key] = spec;
+    partParent[key] = base.parent;
+  }
+  const extras = (preset.extra && preset.extra[rigType]) ? preset.extra[rigType] : [];
+  for (const ex of extras) {
+    const spec = resolvePartSpec({ key: ex.key, name: ex.key, shape: ex.shape, dimensions: ex.dimensions, color: ex.color }, null, finalScales);
+    partDefs[ex.key] = spec;
+    partParent[ex.key] = ex.parent;
+    partOrder.push(ex.key);
+    partDefs[ex.key]._attach = ex;
+  }
+
+  const joints = baseRig.joints.map(j => ({...j, parentNorm: j.parentNorm.slice(), childNorm: j.childNorm.slice()}));
+  for (const ex of extras) {
+    joints.push({ name: 'Extra_' + ex.key, parent: ex.parent, child: ex.key, parentNorm: ex.attachNorm.slice(), childNorm: [0, 0.5, 0] });
+  }
+
+  const sphereGeo = new THREE.SphereGeometry(0.07, 12, 12);
+  const sphereMat = new THREE.MeshBasicMaterial({ color: 0xffd166 });
+
+  for (const key of partOrder) {
+    const def = partDefs[key];
+    const g = new THREE.Group();
+    const geo = makeGeometry(def.shape, def.dimensions);
+    const mat = new THREE.MeshStandardMaterial({color:def.color, roughness:0.6, metalness:0.1});
+    const mesh = new THREE.Mesh(geo, mat);
+    const edges = new THREE.EdgesGeometry(geo);
+    const eline = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color:0x000000, opacity:0.4, transparent:true}));
+    const jMesh = new THREE.Mesh(sphereGeo, sphereMat);
+    g.add(mesh); g.add(eline); g.add(jMesh);
+    jointMarkers.push(jMesh);
+    if (key === 'root') { mesh.visible = false; eline.visible = false; }
+
+    const parentKey = partParent[key];
+    if (parentKey && partDefs[parentKey]) {
+      const jnt = joints.find(j => j.child === key);
+      const parentSize = partDefs[parentKey].size;
+      const pp = [jnt.parentNorm[0]*parentSize[0], jnt.parentNorm[1]*parentSize[1], jnt.parentNorm[2]*parentSize[2]];
+      g.position.set(pp[0], pp[1], pp[2]);
+      groups[parentKey].add(g);
+    } else {
+      rigContainer.add(g);
+      g.position.set(0,0,0);
+    }
+    groups[key] = g;
+    meshes[key] = mesh;
+
+    const childSize = def.size;
+    let childNorm = [0,0,0];
+    if (parentKey && partDefs[parentKey]) {
+      const jnt = joints.find(j => j.child === key);
+      childNorm = jnt.childNorm;
+    }
+    const cp = [childNorm[0]*childSize[0], childNorm[1]*childSize[1], childNorm[2]*childSize[2]];
+    const meshOff = [-cp[0], -cp[1], -cp[2]];
+    mesh.position.set(meshOff[0], meshOff[1], meshOff[2]);
+    eline.position.copy(mesh.position);
+    PARTS[key] = { key, name: def.name, shape: def.shape, dimensions: def.dimensions, color: def.color, size: def.size, parent: parentKey, meshOff: meshOff };
+  }
+
+  for (const j of joints) {
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const l = new THREE.Line(geo, skelMat);
+    rigContainer.add(l);
+    skelLines[j.name] = { line: l, parent: j.parent, child: j.child };
+  }
+
+  JOINTS = joints;
+  PART_ORDER = partOrder;
+  currentRig = rigType;
+  document.getElementById('rigLabel').textContent = presetName;
+}
+
+function resetPose() {
+  for (const key of PART_ORDER) {
+    const def = PARTS[key];
+    if (def.parent) {
+      const jnt = JOINTS.find(j => j.child === key);
+      const parentSize = PARTS[jnt.parent].size;
+      const pp = [jnt.parentNorm[0]*parentSize[0], jnt.parentNorm[1]*parentSize[1], jnt.parentNorm[2]*parentSize[2]];
+      groups[key].position.set(pp[0], pp[1], pp[2]);
+    } else {
+      groups[key].position.set(0,0,0);
+    }
+    groups[key].quaternion.identity();
+  }
+  adjustGround();
+  updateSkel();
+}
+
+// ---------- rest pose capture ----------
+function captureRestPose() {
+  restPose = {};
+  for (const key of PART_ORDER) {
+    const wp = new THREE.Vector3(); groups[key].getWorldPosition(wp);
+    const q = groups[key].quaternion.clone();
+    restPose[key] = { pos: wp.clone(), quat: q };
+  }
+}
+
+function applyRestPose() {
+  for (const key of PART_ORDER) {
+    if (restPose[key]) {
+      groups[key].position.copy(restPose[key].pos);
+      groups[key].quaternion.copy(restPose[key].quat);
+    }
+  }
+  // restore mesh offsets? meshes are children; positions already include offset via group. restPose stored group (joint) positions. Good.
+  adjustGround();
+  updateSkel();
+}
+
+// ---------- ground ----------
+function adjustGround() {
+  rigContainer.position.y = 0;
+  rigContainer.updateMatrixWorld(true);
+  let minY = Infinity;
+  for (const key in meshes) {
+    if (key.includes('leg') || key.includes('foot')) {
+      const box = new THREE.Box3().setFromObject(meshes[key]);
+      minY = Math.min(minY, box.min.y);
+    }
+  }
+  rigContainer.position.y = (isFinite(minY) && minY < 0) ? -minY : 0;
+}
+
+function updateSkel() {
+  for (const name in skelLines) {
+    const { line, parent, child } = skelLines[name];
+    const pa = new THREE.Vector3(); groups[parent].getWorldPosition(pa);
+    const pb = new THREE.Vector3(); groups[child].getWorldPosition(pb);
+    const pos = line.geometry.attributes.position;
+    pos.setXYZ(0, pa.x, pa.y, pa.z);
+    pos.setXYZ(1, pb.x, pb.y, pb.z);
+    pos.needsUpdate = true;
+  }
+}
+
+// ---------- emote loading ----------
+const EMBEDDED_MANIFEST = ["AlterEgo","BangBangBang","Bling-Bang-Bang-Born","Calamel Dancen","Catch my heart","Fright Funk","Gangnam Style","Hai Yorokonde","Iris Out","Koi dance","Linga Guli Guli","Low Coltisol","Magnetic","Mesmerizer","Motagem Hikari","Motagem Xonada","Oddloop","PoPiPo","PokeDance","Ronald Insanity","Sunday Morning","Tears","TikiTiki","Tokyo Ichi Ni San","Unlock it","Yuji Jumping","bibbidiba","hakari","kemusan","otukare summer","scenario"];
+
+const CACHE_KEY = 'emote_manifest_v1';
+const CACHE_TTL = 3600000;
+
+function loadCachedManifest() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !Array.isArray(obj.items) || !obj.time) return null;
+    if (Date.now() - obj.time > CACHE_TTL) return null;
+    return obj.items;
+  } catch (e) { return null; }
+}
+function saveCachedManifest(items) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ items, time: Date.now() })); } catch (e) {}
+}
+
+async function fetchManifest() {
+  const cached = loadCachedManifest();
+  if (cached) { renderManifest(cached, false); return cached; }
+  const status = document.getElementById('emoteStatus');
+  try {
+    status.innerHTML = '<span class="spinner"></span> 一覧を取得中...';
+    const res = await fetch('https://api.github.com/repos/doihi/json-emote-list/contents/?ref=main');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const items = data.filter(x => x.type === 'file' && /\.json$/i.test(x.name))
+      .map(x => ({ name: x.name.replace(/\.json$/i, ''), url: x.download_url }));
+    items.sort((a,b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    saveCachedManifest(items);
+    renderManifest(items, false);
+    return items;
+  } catch (e) {
+    console.warn('[EmoteViewer] manifest fetch failed, using embedded:', e);
+    const items = EMBEDDED_MANIFEST.map(n => ({ name: n, url: null }));
+    renderManifest(items, true);
+    return items;
+  }
+}
+
+function renderManifest(items, offline) {
+  emoteList = items;
+  const status = document.getElementById('emoteStatus');
+  status.textContent = offline ? 'オフライン一覧 (' + items.length + '件)' : items.length + '件';
+  filterEmoteList();
+}
+
+function filterEmoteList() {
+  const q = (document.getElementById('emoteSearch').value || '').toLowerCase();
+  const container = document.getElementById('emoteList');
+  container.innerHTML = '';
+  const filtered = emoteList.filter(e => e.name.toLowerCase().includes(q));
+  for (const e of filtered) {
+    const div = document.createElement('div');
+    div.className = 'emote-item' + (e.name === currentEmoteName ? ' active' : '');
+    if (e.error) { div.classList.add('err'); }
+    div.textContent = e.name + (e.error ? ' ⚠ ' + e.error : '');
+    div.onclick = () => selectEmote(e);
+    container.appendChild(div);
+  }
+}
+
+async function selectEmote(entry) {
+  if (entry.loading) return;
+  entry.loading = true;
+  filterEmoteList();
+  try {
+    if (!entry.data) {
+      if (!entry.url) {
+        // offline manifest: try to construct url
+        entry.url = 'https://raw.githubusercontent.com/doihi/json-emote-list/main/' + encodeURIComponent(entry.name) + '.json';
+      }
+      const res = await fetch(entry.url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      // validate required parts
+      const frames = data.frames || [];
+      if (!frames.length) throw new Error('フレームなし');
+      const partSets = new Set();
+      for (const f of frames) {
+        const parts = f.parts || f.bones || {};
+        for (const k in parts) partSets.add(k);
+      }
+      for (const rp of REQUIRED_PARTS) {
+        if (!partSets.has(rp)) throw new Error('必須パーツ欠け: ' + rp);
+      }
+      // warn unknown parts
+      const unknown = [...partSets].filter(p => REQUIRED_PARTS.indexOf(p) === -1);
+      if (unknown.length) {
+        console.warn('[EmoteViewer] 未知のパーツ（無視）:', unknown.join(', '));
+      }
+      entry.data = data;
+      entry.error = null;
+    }
+    playEmote(entry.name, entry.data);
+  } catch (e) {
+    entry.error = e.message;
+    console.warn('[EmoteViewer] load failed:', entry.name, e);
+  } finally {
+    entry.loading = false;
+    filterEmoteList();
+  }
+}
+
+// ---------- playback ----------
+function parseEmoteFrames(data) {
+  const frames = data.frames || data.keyframes || [];
+  const interval = data.interval || 0.1;
+  const out = [];
+  frames.forEach((f, i) => {
+    const t = (f.t != null) ? f.t : (f.time != null ? f.time : i * interval);
+    const parts = f.parts || f.bones || {};
+    // convert each part cf
+    const converted = {};
+    for (const [name, arr] of Object.entries(parts)) {
+      if (REQUIRED_PARTS.indexOf(name) === -1) continue;
+      const cf = arr.slice(0, 12).map(Number);
+      // coord transform (identity here)
+      const c = robloxToApp(cf);
+      converted[name] = c;
+    }
+    out.push({ t: Number(t), parts: converted });
+  });
+  out.sort((a,b) => a.t - b.t);
+  return out;
+}
+
+function sampleEmote(t) {
+  // returns map partName -> {pos, quat} in app coords (world, root-relative)
+  const result = {};
+  if (!frames.length) return result;
+  if (!isFinite(t)) return result;
+  // single-frame guard
+  if (frames.length === 1) {
+    const f = frames[0];
+    const rootCf = f.parts['HumanoidRootPart'] ? robloxToApp(f.parts['HumanoidRootPart']) : [0,0,0,1,0,0,0,1,0,0,0,1];
+    const rootT = cfToPosQuat(rootCf);
+    const finalRootPos = rootT.pos.clone().applyQuaternion(baseRootQuat).add(baseRootPos);
+    const finalRootQuat = baseRootQuat.clone().multiply(rootT.quat);
+    playbackRootPos.copy(finalRootPos);
+    playbackRootQuat.copy(finalRootQuat);
+    for (const pname of REQUIRED_PARTS) {
+      const cf = f.parts[pname];
+      if (!cf) continue;
+      const c = robloxToApp(cf);
+      const tr = cfToPosQuat(c);
+      const worldPos = tr.pos.clone().applyQuaternion(rootT.quat).add(rootT.pos);
+      const worldQuat = rootT.quat.clone().multiply(tr.quat);
+      const finalPos = worldPos.clone().applyQuaternion(baseRootQuat).add(baseRootPos);
+      const finalQuat = baseRootQuat.clone().multiply(worldQuat);
+      result[pname] = { pos: finalPos, quat: finalQuat };
+    }
+    return result;
+  }
+  // clamp
+  let tt = t;
+  if (tt < frames[0].t) tt = frames[0].t;
+  if (tt > frames[frames.length-1].t) tt = frames[frames.length-1].t;
+  // find segment
+  let i = 0;
+  for (; i < frames.length - 2; i++) {
+    if (tt >= frames[i].t && tt <= frames[i+1].t) break;
+  }
+  const a = frames[i], b = frames[i+1];
+  const span = b.t - a.t;
+  const alpha = span > 0 ? (tt - a.t) / span : 0;
+
+  // root transform
+  const rootA = a.parts['HumanoidRootPart'] ? cfToPosQuat(a.parts['HumanoidRootPart']) : { pos: new THREE.Vector3(0,0,0), quat: new THREE.Quaternion() };
+  const rootB = b.parts['HumanoidRootPart'] ? cfToPosQuat(b.parts['HumanoidRootPart']) : { pos: new THREE.Vector3(0,0,0), quat: new THREE.Quaternion() };
+  const rootPos = rootA.pos.clone().lerp(rootB.pos, alpha);
+  const rootQuat = rootA.quat.clone().slerp(rootB.quat, alpha);
+  // base-applied root
+  const finalRootPos = rootPos.clone().applyQuaternion(baseRootQuat).add(baseRootPos);
+  const finalRootQuat = baseRootQuat.clone().multiply(rootQuat);
+  playbackRootPos.copy(finalRootPos);
+  playbackRootQuat.copy(finalRootQuat);
+
+  for (const pname of REQUIRED_PARTS) {
+    const ca = a.parts[pname];
+    const cb = b.parts[pname];
+    if (!ca || !cb) continue;
+    const ta = cfToPosQuat(ca);
+    const tb = cfToPosQuat(cb);
+    const posA = ta.pos.clone();
+    const posB = tb.pos.clone();
+    const pos = posA.lerp(posB, alpha);
+    const quat = ta.quat.clone().slerp(tb.quat, alpha);
+    // apply root transform
+    const worldPos = pos.clone().applyQuaternion(rootQuat).add(rootPos);
+    const worldQuat = rootQuat.clone().multiply(quat);
+    // apply base transform (rest root world matrix)
+    const finalPos = worldPos.clone().applyQuaternion(baseRootQuat).add(baseRootPos);
+    const finalQuat = baseRootQuat.clone().multiply(worldQuat);
+    result[pname] = { pos: finalPos, quat: finalQuat };
+  }
+  return result;
+}
+
+function playEmote(name, data) {
+  currentEmoteName = name;
+  frames = parseEmoteFrames(data);
+  duration = frames.length ? frames[frames.length-1].t : 0;
+  if (duration <= 0) duration = 1;
+  currentEmote = data;
+  // fix scales to 1
+  const savedScale = { height: bodyScale.height, width: bodyScale.width, head: bodyScale.head };
+  bodyScale = { height:1, width:1, head:1 };
+  document.getElementById('heightScale').value = 1;
+  document.getElementById('widthScale').value = 1;
+  document.getElementById('headScale').value = 1;
+  document.getElementById('hv').textContent = '1.00';
+  document.getElementById('wv').textContent = '1.00';
+  document.getElementById('ev').textContent = '1.00';
+  // disable sliders
+  document.getElementById('heightScale').disabled = true;
+  document.getElementById('widthScale').disabled = true;
+  document.getElementById('headScale').disabled = true;
+  // rebuild model with scale 1 (rest) but we'll override transforms during play
+  buildModel(currentRig, currentPreset, bodyScale);
+  resetPose();
+  adjustGround();
+  updateSkel();
+  // capture base transform (rest root world matrix)
+  const bp = new THREE.Vector3(); groups['root'].getWorldPosition(bp);
+  const bq = new THREE.Quaternion(); groups['root'].getWorldQuaternion(bq);
+  baseRootPos.copy(bp);
+  baseRootQuat.copy(bq);
+  // hide skeleton/joints during play
+  for (const k in skelLines) skelLines[k].line.visible = false;
+  jointMarkers.forEach(m => m.visible = false);
+
+  elapsed = 0;
+  playing = true;
+  emotePlaying = true;
+  document.getElementById('currentEmote').textContent = '現在: ' + name;
+  document.getElementById('hud').textContent = name + ' / ' + duration.toFixed(2) + 's';
+  document.getElementById('stats').innerHTML = `エモート: <b>${name}</b><br>フレーム: <b>${frames.length}</b><br>長さ: <b>${duration.toFixed(2)}s</b>`;
+  updateUI();
+  filterEmoteList();
+}
+
+function stopEmote() {
+  if (!emotePlaying) return;
+  playing = false;
+  emotePlaying = false;
+  frames = [];
+  currentEmote = null;
+  currentEmoteName = '';
+  // restore scales
+  bodyScale = { height: parseFloat(document.getElementById('heightScale').value) || 1, width: parseFloat(document.getElementById('widthScale').value) || 1, head: parseFloat(document.getElementById('headScale').value) || 1 };
+  // Actually restore from saved? We overwrote slider values to 1. Need saved scale. Let's just set to 1 default; user can adjust.
+  bodyScale = { height:1, width:1, head:1 };
+  document.getElementById('heightScale').disabled = false;
+  document.getElementById('widthScale').disabled = false;
+  document.getElementById('headScale').disabled = false;
+  // rebuild rest
+  buildModel(currentRig, currentPreset, bodyScale);
+  resetPose();
+  updatePose(0);
+  captureRestPose();
+  adjustGround();
+  updateSkel();
+  // restore skeleton/joints visibility per checkboxes
+  const sk = document.getElementById('showSkeleton').checked;
+  const jt = document.getElementById('showJoints').checked;
+  for (const k in skelLines) skelLines[k].line.visible = sk;
+  jointMarkers.forEach(m => m.visible = jt);
+  document.getElementById('currentEmote').textContent = '現在: (なし)';
+  document.getElementById('hud').textContent = '—';
+  filterEmoteList();
+}
+
+// override updatePose to handle emote playback
+const _origUpdatePose = updatePose;
+const keyToPartName = { torso:'Torso', head:'Head', leftarm:'Left Arm', rightarm:'Right Arm', leftleg:'Left Leg', rightleg:'Right Leg' };
+
+function updatePoseEmote(t) {
+  if (emotePlaying && frames.length) {
+    const sample = sampleEmote(t);
+    rigContainer.position.y = 0;
+    for (const key of PART_ORDER) {
+      const def = PARTS[key];
+      const pname = keyToPartName[key];
+      let desiredPos, desiredQuat;
+      if (pname && sample[pname]) {
+        desiredPos = sample[pname].pos.clone();
+        desiredQuat = sample[pname].quat.clone();
+      } else if (key === 'root') {
+        desiredPos = playbackRootPos.clone();
+        desiredQuat = playbackRootQuat.clone();
+      } else if (restPose[key]) {
+        desiredPos = restPose[key].pos.clone();
+        desiredQuat = restPose[key].quat.clone();
+      } else {
+        desiredPos = new THREE.Vector3(0,0,0);
+        desiredQuat = new THREE.Quaternion();
+      }
+      // convert desired part-center world to joint-group world (subtract meshOff)
+      const meshOff = new THREE.Vector3(def.meshOff[0], def.meshOff[1], def.meshOff[2]);
+      const rotatedOff = meshOff.clone().applyQuaternion(desiredQuat);
+      const desiredGroupPos = desiredPos.clone().sub(rotatedOff);
+
+      // parent world transform
+      let parentPos = new THREE.Vector3(0,0,0);
+      let parentQuat = new THREE.Quaternion();
+      if (def.parent && groups[def.parent]) {
+        groups[def.parent].getWorldPosition(parentPos);
+        groups[def.parent].getWorldQuaternion(parentQuat);
+      }
+      const invQ = parentQuat.clone().invert();
+      const localPos = desiredGroupPos.sub(parentPos).applyQuaternion(invQ);
+      const localQuat = invQ.clone().multiply(desiredQuat);
+      groups[key].position.copy(localPos);
+      groups[key].quaternion.copy(localQuat);
+    }
+    updateSkel();
+    return;
+  }
+  // rest mode
+  for (const key of PART_ORDER) {
+    const def = PARTS[key];
+    if (def.parent) {
+      const jnt = JOINTS.find(j => j.child === key);
+      const parentSize = PARTS[jnt.parent].size;
+      const pp = [jnt.parentNorm[0]*parentSize[0], jnt.parentNorm[1]*parentSize[1], jnt.parentNorm[2]*parentSize[2]];
+      groups[key].position.set(pp[0], pp[1], pp[2]);
+    } else {
+      groups[key].position.set(0,0,0);
+    }
+    groups[key].quaternion.identity();
+  }
+  adjustGround();
+  updateSkel();
+}
+
+// map part names
+const partNameToKey = {
+  'Torso': 'torso', 'Head': 'head', 'Left Arm': 'leftarm', 'Right Arm': 'rightarm',
+  'Left Leg': 'leftleg', 'Right Leg': 'rightleg',
+};
+
+// replace updatePose reference
+// We'll monkey-patch by reassigning? updatePose is a function declaration (hoisted). 
+// Instead, call updatePoseEmote in animate loop. We'll modify animate to use updatePoseEmote.
+
+// ---------- UI wiring ----------
+document.getElementById('emoteSearch').oninput = filterEmoteList;
+
+document.getElementById('playBtn').onclick = () => {
+  if (emotePlaying) { playing = true; }
+  else if (currentEmote) { playing = true; }
+};
+document.getElementById('pauseBtn').onclick = () => { playing = false; };
+document.getElementById('stopBtn').onclick = () => { stopEmote(); };
+
+document.getElementById('speed').onchange = (e) => { speed = parseFloat(e.target.value); };
+document.getElementById('loopChk').onchange = (e) => { loop = e.target.checked; };
+document.getElementById('showGrid').onchange = (e) => { grid.visible = e.target.checked; };
+document.getElementById('showSkeleton').onchange = (e) => {
+  if (!emotePlaying) for (const k in skelLines) skelLines[k].line.visible = e.target.checked;
+};
+document.getElementById('showJoints').onchange = (e) => {
+  if (!emotePlaying) jointMarkers.forEach(m => m.visible = e.target.checked);
+};
+document.getElementById('autoRotate').onchange = (e) => { autoRot = e.target.checked; };
+document.getElementById('slider').oninput = (e) => {
+  if (sliderUpdating) return;
+  if (!emotePlaying) return;
+  elapsed = parseFloat(e.target.value);
+  playing = false;
+  updatePoseEmote(elapsed);
+  updateUI();
+};
+
+// sliders
+function onScaleChange() {
+  if (emotePlaying) return;
+  bodyScale.height = parseFloat(document.getElementById('heightScale').value);
+  bodyScale.width = parseFloat(document.getElementById('widthScale').value);
+  bodyScale.head = parseFloat(document.getElementById('headScale').value);
+  document.getElementById('hv').textContent = bodyScale.height.toFixed(2);
+  document.getElementById('wv').textContent = bodyScale.width.toFixed(2);
+  document.getElementById('ev').textContent = bodyScale.head.toFixed(2);
+  buildModel(currentRig, currentPreset, bodyScale);
+  resetPose();
+  updatePose(0);
+  captureRestPose();
+  adjustGround();
+  updateSkel();
+}
+document.getElementById('heightScale').oninput = onScaleChange;
+document.getElementById('widthScale').oninput = onScaleChange;
+document.getElementById('headScale').oninput = onScaleChange;
+
+// keyboard
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); playing = !playing; }
+  else if (e.code === 'Escape') { stopEmote(); }
+  else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+    e.preventDefault();
+    if (!emoteList.length) return;
+    const idx = emoteList.findIndex(x => x.name === currentEmoteName);
+    let ni = idx + (e.code === 'ArrowDown' ? 1 : -1);
+    if (ni < 0) ni = emoteList.length - 1;
+    if (ni >= emoteList.length) ni = 0;
+    selectEmote(emoteList[ni]);
+  }
+});
+
+// ---------- resize ----------
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height);
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- loop ----------
+let autoRot = false;
+let lastTime = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (playing && emotePlaying && frames.length) {
+    if (!isFinite(elapsed)) elapsed = 0;
+    let dtc = dt;
+    if (!isFinite(dtc) || dtc < 0) dtc = 0;
+    if (dtc > 0.25) dtc = 0.25; // cap per-frame advance
+    elapsed += dtc * speed;
+    if (loop) {
+      if (elapsed > duration) elapsed = elapsed % duration;
+    } else {
+      if (elapsed >= duration) { elapsed = duration; playing = false; }
+    }
+    updatePoseEmote(elapsed);
+    updateUI();
+  }
+  if (autoRot) scene.rotation.y += dt * 0.3;
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function updateUI() {
+  const slider = document.getElementById('slider');
+  slider.max = duration || 1;
+  sliderUpdating = true;
+  slider.value = elapsed;
+  sliderUpdating = false;
+  document.getElementById('tCur').textContent = elapsed.toFixed(2);
+  document.getElementById('tDur').textContent = (duration || 0).toFixed(2);
+}
+
+// ---------- init ----------
+buildModel(currentRig, currentPreset, bodyScale);
+resetPose();
+captureRestPose();
+adjustGround();
+updateSkel();
+animate();
+
+// load manifest
+fetchManifest();
+
+// expose updatePose for compatibility
+function updatePose(t) { updatePoseEmote(t); }
+</script>
+</body>
+</html>
