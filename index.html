@@ -795,8 +795,10 @@ async function openViewer(name) {
     const bq = new THREE.Quaternion(); groups['root'].getWorldQuaternion(bq);
     baseRootPos.copy(bp); baseRootQuat.copy(bq);
     updatePoseEmote(0);
-    if (getAutoPlay()) { state.status = 'playing'; playing = true; emotePlaying = true; }
-    else { state.status = 'ready'; }
+    // auto play on select
+    state.status = 'playing';
+    playing = true;
+    emotePlaying = true;
     setState('viewer', state.status);
     updateUI();
     fitCamera();
