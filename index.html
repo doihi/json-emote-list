@@ -295,7 +295,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0c10);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-camera.position.set(8, 5, 10);
+camera.position.set(0, 3, -6);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0,1,0);
 controls.enableDamping = true;
@@ -1106,7 +1106,7 @@ function fitCamera() {
   const fov = camera.fov * Math.PI / 180;
   let cameraZ = maxDim / (2 * Math.tan(fov / 2));
   cameraZ *= 1.6;
-  camera.position.set(center.x + cameraZ * 0.6, center.y + cameraZ * 0.3, center.z + cameraZ * 0.8);
+  camera.position.set(center.x, center.y + cameraZ * 0.2, center.z - cameraZ);
   controls.target.copy(center);
   controls.update();
   needsRender = true;
