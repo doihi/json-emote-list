@@ -8,15 +8,15 @@
   :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f2330; --fg:#e6e9ef; --muted:#9aa3b2; --accent:#4f8cff; --accent2:#ff6b6b; }
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; height:100%; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); overflow:hidden; }
-  .app { display:flex; height:100dvh; height:100vh; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); overflow:hidden; margin:0; padding:0; }
+  .app { display:flex; height:100vh; height:100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .panel { width:320px; background:var(--panel); border-right:1px solid #2a2f3a; padding:12px; overflow:hidden; display:flex; flex-direction:column; gap:12px; }
   .panel .card.emote-card { flex:1; display:flex; flex-direction:column; min-height:0; }
   .viewer { flex:1; position:relative; background:#0a0c10; display:flex; flex-direction:column; }
   .viewer-header { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid #2a2f3a; }
   .viewer-header h2 { margin:0; font-size:1rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .stage { flex:1; position:relative; background:#0a0c10; }
-  #canvas { width:100%; height:100%; display:block; touch-action:none; }
+  .stage { flex:1; min-height:0; position:relative; background:#0a0c10; }
+  #canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
   .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; background:rgba(0,0,0,.5); color:#fff; pointer-events:none; }
   .overlay button { pointer-events:auto; }
   .viewer-info { padding:8px 12px; background:var(--panel); border-top:1px solid #2a2f3a; font-size:.8rem; color:var(--muted); }
@@ -70,7 +70,7 @@
   @media (max-width: 899px) {
     .desktop-layout { display:none; }
   }
-  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  /* safe-area handled by .app */
   .no-scroll { overflow:hidden; }
 </style>
 </head>
@@ -594,6 +594,8 @@ function setState(screen, status) {
 }
 function applyState() {
   ensureCanvasParent();
+  resize();
+  needsRender = true;
   // mobile screen toggle
   const isMobile = window.innerWidth < 900;
   const screenList = document.getElementById('screenList');
